@@ -1,0 +1,188 @@
+#!/usr/bin/env perl
+#
+# remotediff - remote diff over rsync
+#
+# 2022.06.24 v1.00 jul : first release
+
+use 5.006;
+use strict;
+use warnings;
+use utf8;
+use Getopt::Std;
+use File::Basename;
+use File::Temp qw(tempdir);
+use File::Path qw(make_path rmtree);
+use Cwd qw(abs_path);
+
+our $VERSION = '1.00';
+my $program  = basename($0);
+my $usage    = <<EOF;
+
+Usage: $program [OPTION]... FILES
+
+Like 'diff' :
+FILES are 'FILE1 FILE2' or 'DIR1 DIR2' or 'DIR FILE...' or 'FILE... DIR'.
+
+Like 'rsync' :
+FILES can be [[USER@]HOST:]SRC
+
+But '..' is forbidden in local and remote sources.
+
+All [OPTION] pass through to 'diff'.
+
+See `perldoc $program` for full documentation.
+EOF
+
+# options and args
+die $usage if @ARGV < 2;
+my $opts = @ARGV > 2 ? join(' ', splice(@ARGV,0,@ARGV-2)) : "";
+die $usage if $ARGV[0] =~ /\.\./ or $ARGV[1] =~ /\.\./;
+
+########
+# MAIN #
+########
+
+# flush output
+select(STDERR);
+$| = 1;
+select(STDOUT);
+$| = 1;
+     
+my $tmp = File::Spec->tmpdir() . "/remotediff"; # cache remote sources
+#my $tmp = tempdir( CLEANUP => 1 );             # no cache, safer
+
+# process file 1
+if ( $ARGV[0] =~ /^([^\/:]*:)(\/?)(.+)/ )
+{
+	# remote src
+	my $host = $1;
+	my $root = $2;
+	my $path = dirname($3);
+	my $base = basename($3);
+
+	make_path("$tmp/1/$host");
+	system ("rsync -az --relative --copy-dirlinks $ARGV[0] $tmp/1/$host") == 0 or die "system failed: $?";
+	
+	if ( $root ne '/' )
+	{
+		# relative src	
+		my @dirs = File::Spec->splitdir($path);
+
+		my $old = $path eq '.' ? "$tmp/1/$host/$base" : "$tmp/1/$host/$dirs[0]" ;
+		my $new = $path eq '.' ? "$tmp/1/$host$base"  : "$tmp/1/$host$dirs[0]"  ;
+
+		# recreate symlink
+		unlink($new);
+		symlink($old,$new) or die "symlink failed : $!";
+	}
+	
+}
+else
+{
+	# local src
+	my $path = dirname($ARGV[0]);
+	my $base = basename($ARGV[0]);
+
+	# recreate symlink
+	rmtree("$tmp/1", {keep_root => 1});
+	make_path("$tmp/1/$path");	
+	symlink(abs_path($ARGV[0]),"$tmp/1/$path/$base") or die "symlink failed : $!";
+}
+
+# process file 2
+if ( $ARGV[1] =~ /^([^\/:]*:)(\/?)(.+)/ )
+{
+	# remote src
+	my $host = $1;
+	my $root = $2;
+	my $path = dirname($3);
+	my $base = basename($3);
+
+	make_path("$tmp/2/$host");
+	system ("rsync -az --relative --copy-dirlinks $ARGV[1] $tmp/2/$host") == 0 or die "system failed: $?";
+	
+	if ( $root ne '/' )
+	{
+		# relative src
+		my @dirs = File::Spec->splitdir($path);
+
+		my $old = $path eq '.' ? "$tmp/2/$host/$base" : "$tmp/2/$host/$dirs[0]" ;
+		my $new = $path eq '.' ? "$tmp/2/$host$base"  : "$tmp/2/$host$dirs[0]"  ;
+
+		# recreate symlink
+		unlink($new);
+		symlink($old,$new) or die "symlink failed : $!";
+	}
+	
+}
+else
+{
+	# local src
+	my $path = dirname($ARGV[1]);
+	my $base = basename($ARGV[1]);
+
+	# recreate symlink
+	rmtree("$tmp/2", {keep_root => 1});
+	make_path("$tmp/2/$path");	
+	symlink(abs_path($ARGV[1]),"$tmp/2/$path/$base") or die "symlink failed : $!";
+}
+
+my $diff = 'diff';
+$diff = 'colordiff' if -t STDOUT and `which colordiff`; # use colordiff if tty
+
+chdir $tmp;
+
+$ARGV[0] =~ s/^\///; # remove leading / in absolute path
+$ARGV[1] =~ s/^\///; # remove leading / in absolute path
+
+exec ("$diff $opts 1/$ARGV[0] 2/$ARGV[1]");
+
+exit 1;
+
+__END__
+
+=head1 NAME
+
+remotediff - remote diff over rsync
+
+=head1 SYNOPSIS
+
+    $ remotediff [OPTION]... FILES
+
+    Like 'diff' :
+    FILES are 'FILE1 FILE2' or 'DIR1 DIR2' or 'DIR FILE...' or 'FILE... DIR'.
+
+    Like 'rsync' :
+    FILES can be [[USER@]HOST:]SRC
+
+    But '..' is forbidden in local and remote sources.
+
+    All [OPTION] pass through to 'diff'.
+
+=head1 DESCRIPTION
+
+`remotediff` uses rsync to download remote files to a tmp directory, before
+executing `diff` on them locally.
+
+Remote sources 'remote:/SRC1' (absolute) and 'remote:SRC2' (relative) are
+passed to 'diff' as '1/remote:/SRC1' and '2/remote:SRC2', but local sources
+'/SRC1' (absolute) and 'SRC2' (relative) are passed as '1/SRC1' and '2/SRC2'.
+
+'colordiff' is used if installed and STDOUT is a TTY.
+
+=head1 BUGS
+
+Please report any bugs or feature requests to C<kaldor@cpan.org>, or through
+the web interface at L<https://github.com/kal247/App-remotediff/issues>.
+
+=head1 AUTHOR
+
+jul, C<kaldor@cpan.org>
+
+=head1 LICENSE AND COPYRIGHT
+
+This software is Copyright (c) 2022 by jul.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)

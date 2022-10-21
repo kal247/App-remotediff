@@ -14,7 +14,7 @@ else
     plan tests => 1;
 
 is(scalar(`"$^X" -Ilib script/remotediff -q t/data/file1 t/data/file2`), <<'EOF'
-Files 1/t/data/file1 and 2/t/data/file2 differ
+Files t/data/file1 and t/data/file2 differ
 EOF
 , "remotediff - local diff quiet no tty");
 

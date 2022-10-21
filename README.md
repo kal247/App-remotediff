@@ -20,12 +20,8 @@ SYNOPSIS
 DESCRIPTION
 -----------
 
-`remotediff` uses `rsync` to download remote files to a tmp directory, before
+`remotediff` uses `rsync` to copy remote files to a tmp directory, before
 executing `diff` on them locally.
-
-Remote sources "remote:/SRC1" (absolute) and "remote:SRC2" (relative) are
-passed to `diff` as "1/remote:/SRC1" and "2/remote:SRC2", but local sources
-"/SRC1" (absolute) and "SRC2" (relative) are passed as "1/SRC1" and "2/SRC2".
 
 `colordiff` is used if installed and STDOUT is a TTY.
 

@@ -2,6 +2,7 @@
 #
 # remotediff - remote diff over rsync
 #
+# 2022.10.21 v1.10 jul : fixed caching
 # 2022.06.24 v1.00 jul : first release
 
 use 5.006;
@@ -11,10 +12,10 @@ use utf8;
 use Getopt::Std;
 use File::Basename;
 use File::Temp qw(tempdir);
-use File::Path qw(make_path rmtree);
+use File::Path qw(make_path);
 use Cwd qw(abs_path);
 
-our $VERSION = '1.00';
+our $VERSION = '1.10';
 my $program  = basename($0);
 my $usage    = <<EOF;
 
@@ -49,7 +50,7 @@ select(STDOUT);
 $| = 1;
      
 my $tmp = File::Spec->tmpdir() . "/remotediff"; # cache remote sources
-#my $tmp = tempdir( CLEANUP => 1 );             # no cache, safer
+#my $tmp = tempdir( CLEANUP => 1 );             # no cache
 
 # process file 1
 if ( $ARGV[0] =~ /^([^\/:]*:)(\/?)(.+)/ )
@@ -60,22 +61,21 @@ if ( $ARGV[0] =~ /^([^\/:]*:)(\/?)(.+)/ )
 	my $path = dirname($3);
 	my $base = basename($3);
 
-	make_path("$tmp/1/$host");
-	system ("rsync -az --relative --copy-dirlinks $ARGV[0] $tmp/1/$host") == 0 or die "system failed: $?";
+	make_path("$tmp/$host");
+	system ("rsync -az --relative --copy-dirlinks $ARGV[0] $tmp/$host") == 0 or die "system failed: $?";
 	
 	if ( $root ne '/' )
 	{
 		# relative src	
 		my @dirs = File::Spec->splitdir($path);
 
-		my $old = $path eq '.' ? "$tmp/1/$host/$base" : "$tmp/1/$host/$dirs[0]" ;
-		my $new = $path eq '.' ? "$tmp/1/$host$base"  : "$tmp/1/$host$dirs[0]"  ;
+		my $old = $path eq '.' ? "$tmp/$host/$base" : "$tmp/$host/$dirs[0]" ;
+		my $new = $path eq '.' ? "$tmp/$host$base"  : "$tmp/$host$dirs[0]"  ;
 
 		# recreate symlink
 		unlink($new);
 		symlink($old,$new) or die "symlink failed : $!";
 	}
-	
 }
 else
 {
@@ -84,9 +84,9 @@ else
 	my $base = basename($ARGV[0]);
 
 	# recreate symlink
-	rmtree("$tmp/1", {keep_root => 1});
-	make_path("$tmp/1/$path");	
-	symlink(abs_path($ARGV[0]),"$tmp/1/$path/$base") or die "symlink failed : $!";
+	make_path("$tmp/$path");
+	unlink "$tmp/$path/$base";
+	symlink(abs_path($ARGV[0]),"$tmp/$path/$base") or die "symlink failed : $!";
 }
 
 # process file 2
@@ -98,22 +98,21 @@ if ( $ARGV[1] =~ /^([^\/:]*:)(\/?)(.+)/ )
 	my $path = dirname($3);
 	my $base = basename($3);
 
-	make_path("$tmp/2/$host");
-	system ("rsync -az --relative --copy-dirlinks $ARGV[1] $tmp/2/$host") == 0 or die "system failed: $?";
+	make_path("$tmp/$host");
+	system ("rsync -az --relative --copy-dirlinks $ARGV[1] $tmp/$host") == 0 or die "system failed: $?";
 	
 	if ( $root ne '/' )
 	{
 		# relative src
 		my @dirs = File::Spec->splitdir($path);
 
-		my $old = $path eq '.' ? "$tmp/2/$host/$base" : "$tmp/2/$host/$dirs[0]" ;
-		my $new = $path eq '.' ? "$tmp/2/$host$base"  : "$tmp/2/$host$dirs[0]"  ;
+		my $old = $path eq '.' ? "$tmp/$host/$base" : "$tmp/$host/$dirs[0]" ;
+		my $new = $path eq '.' ? "$tmp/$host$base"  : "$tmp/$host$dirs[0]"  ;
 
 		# recreate symlink
 		unlink($new);
 		symlink($old,$new) or die "symlink failed : $!";
-	}
-	
+	}	
 }
 else
 {
@@ -122,9 +121,9 @@ else
 	my $base = basename($ARGV[1]);
 
 	# recreate symlink
-	rmtree("$tmp/2", {keep_root => 1});
-	make_path("$tmp/2/$path");	
-	symlink(abs_path($ARGV[1]),"$tmp/2/$path/$base") or die "symlink failed : $!";
+	make_path("$tmp/$path");
+	unlink "$tmp/$path/$base";
+	symlink(abs_path($ARGV[1]),"$tmp/$path/$base") or die "symlink failed : $!";
 }
 
 my $diff = 'diff';
@@ -132,12 +131,7 @@ $diff = 'colordiff' if -t STDOUT and `which colordiff`; # use colordiff if tty
 
 chdir $tmp;
 
-$ARGV[0] =~ s/^\///; # remove leading / in absolute path
-$ARGV[1] =~ s/^\///; # remove leading / in absolute path
-
-exec ("$diff $opts 1/$ARGV[0] 2/$ARGV[1]");
-
-exit 1;
+exec ("$diff $opts $ARGV[0] $ARGV[1]");
 
 __END__
 
@@ -161,12 +155,8 @@ remotediff - remote diff over rsync
 
 =head1 DESCRIPTION
 
-`remotediff` uses `rsync` to download remote files to a tmp directory, before
+`remotediff` uses `rsync` to copy remote files to a tmp directory, before
 executing `diff` on them locally.
-
-Remote sources "remote:/SRC1" (absolute) and "remote:SRC2" (relative) are
-passed to `diff` as "1/remote:/SRC1" and "2/remote:SRC2", but local sources
-"/SRC1" (absolute) and "SRC2" (relative) are passed as "1/SRC1" and "2/SRC2".
 
 `colordiff` is used if installed and STDOUT is a TTY.
 
